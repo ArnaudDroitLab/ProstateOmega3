@@ -1,4 +1,3 @@
-module load dataset/Homo_sapiens_GRCh38
 module load trimmomatic/0.36
 module load kallisto/0.44.0
 
@@ -30,10 +29,21 @@ sort < tmp_file_list | perl -ne 'print "$1\n" if /(.+)_L..._R._001.fastq.gz/' | 
 
 for read sample; do
     mkdir -p output/$sample
-    
-    for R1file in `ls /u01/genomique/Demultiplexing/results/*/fastq/20180703-BILS001/$sample*_R1_001.fastq.gz`
+    script=output/$sample/trim_kallisto.sh
+    cat <<'EOF' > $script
+#!/bin/bash
+#SBATCH --job-name=$sample.kallisto
+#SBATCH --account=def-stbil30
+#SBATCH --time=4:00:00
+#SBATCH --mem=32G
+#SBATCH --cpus-per-task=8
+
+module load trimmomatic/0.36
+module load kallisto/0.44.0
+
+    for R1file in `ls raw/\*/$sample\*_R1_001.fastq.gz`
     do
-        flowcell=`echo $R1file | perl -ne 'print "$1" if /results\/(.+)\/fastq/'`
+        flowcell=`echo $R1file | perl -ne 'print "$1" if /raw\/(.+)\//'`
         lane=`echo $R1file | perl -ne 'print "$1" if /_(L\d\d\d)_R\d/'`
     
         R2file=`echo $R1file | perl -ne '($_ =~ s/_R1_/_R2_/); print $_'`
@@ -60,36 +70,13 @@ for read sample; do
         filelist="$filelist $R1file $R2file"
     done
     
-    kallisto quant -i ref/Homo_sapiens.GRCh38.cdna.all.fa.idx -o output/$sample --rf-stranded $filelist
+    kallisto quant -i ref/Homo_sapiens.GRCh38.cdna.all.fa.idx -t 6 -o output/$sample --rf-stranded $filelist
     
     # Remove temp
-    # rm output/$sample*.fastq.gz
+    rm output/$sample*.fastq.gz
+EOF
+
+    sbatch --export=sample=$sample -o $script.stdout -e $script.stderr -D `pwd` $script 
     
 done <unique_sample_list 
 
-
-
-
-JOB_NAME=trimmomatic.DEX_nonMamm_1_1
-JOB_DEPENDENCIES=$picard_sam_to_fastq_1_JOB_ID
-JOB_DONE=job_output/trimmomatic/trimmomatic.DEX_nonMamm_1_1.07127a1c5c6871e58320f42ab51a3420.mugqic.done
-JOB_OUTPUT_RELATIVE_PATH=$STEP/${JOB_NAME}_$TIMESTAMP.o
-JOB_OUTPUT=$JOB_OUTPUT_DIR/$JOB_OUTPUT_RELATIVE_PATH
-COMMAND=$(cat << 'trimmomatic.DEX_nonMamm_1_1.07127a1c5c6871e58320f42ab51a3420.mugqic.done'
-module load java/1.8.0_121 mugqic/trimmomatic/0.36 && \
-mkdir -p trim/DEX_nonMamm_1 && \
-java -XX:ParallelGCThreads=1 -Xmx2G -jar $TRIMMOMATIC_JAR PE \
-  -threads 6 \
-  -phred33 \
-  /project/6001942/Working_Directory/Eric/CofactorHR/A549/raw/rna-seq/HI.2031.002.Index_3.SB_A549-DEX-nonMamm.pair1.fastq.gz \
-  /project/6001942/Working_Directory/Eric/CofactorHR/A549/raw/rna-seq/HI.2031.002.Index_3.SB_A549-DEX-nonMamm.pair2.fastq.gz \
-  trim/DEX_nonMamm_1/DEX_nonMamm_1_1.trim.pair1.fastq.gz \
-  trim/DEX_nonMamm_1/DEX_nonMamm_1_1.trim.single1.fastq.gz \
-  trim/DEX_nonMamm_1/DEX_nonMamm_1_1.trim.pair2.fastq.gz \
-  trim/DEX_nonMamm_1/DEX_nonMamm_1_1.trim.single2.fastq.gz \
-  ILLUMINACLIP:/cvmfs/soft.mugqic/CentOS6/software/mugqic_pipelines/mugqic_pipelines-2.1.0/bfx/adapters-truseq.fa:2:30:15:8:true \
-  TRAILING:30 \
-  MINLEN:32 \
-  2> trim/DEX_nonMamm_1/DEX_nonMamm_1_1.trim.log
-trimmomatic.DEX_nonMamm_1_1.07127a1c5c6871e58320f42ab51a3420.mugqic.done
-)
