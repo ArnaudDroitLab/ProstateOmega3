@@ -100,7 +100,7 @@ pca_df$Label = rownames(pca_df)
 pca_df = dplyr::left_join(pca_df, samples, by=c(Label="Label"))
 ggplot(pca_df, mapping=aes(x=PC1, y=PC2, color=ERCCMix, label=Patient)) + geom_point()
 
-expression_subset = expression_set[,pData(expression_set)$Group!="G7" & pData(expression_set)$BothConditions & pData(expression_set)$Patient %in% c("P031", "P045", "P049", "P050", "P053")]
+expression_subset = expression_set[,pData(expression_set)$Group!="G7" & pData(expression_set)$BothConditions]
 expression_subset_meta = pData(expression_subset)
 expression_subset_meta$TreatmentStatus = factor(expression_subset_meta$TreatmentStatus, levels=c("Pre", "5-ARI", "Diète"))
 expression_subset_meta$Patient = factor(expression_subset_meta$Patient)
@@ -109,5 +109,6 @@ dds <- DESeq(dds, parallel=TRUE, BPPARAM=MulticoreParam(workers = 16))
 save(dds, file="output/dds.RData")
 
 deseq_res <- results(dds, contrast = c("TreatmentStatus", "Diète", "Pre"))
-
+write.table(as.data.frame(deseq_res), file="output/Diète.txt", sep="\t", col.names=TRUE, row.names=FALSE)
 deseq_res <- results(dds, contrast = c("TreatmentStatus", "5-ARI", "Pre"))
+write.table(as.data.frame(deseq_res), file="output/5-ARI.txt", sep="\t", col.names=TRUE, row.names=FALSE)
