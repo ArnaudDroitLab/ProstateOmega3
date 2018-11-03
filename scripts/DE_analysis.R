@@ -105,7 +105,7 @@ expression_subset_meta = pData(expression_subset)
 expression_subset_meta$TreatmentStatus = factor(expression_subset_meta$TreatmentStatus, levels=c("Pre", "5-ARI", "Diète"))
 expression_subset_meta$Patient = factor(expression_subset_meta$Patient)
 dds <- DESeqDataSetFromMatrix(normCounts(expression_subset), expression_subset_meta, ~ Patient + TreatmentStatus)
-dds <- DESeq(dds, parallel=TRUE, BPPARAM=MulticoreParam(workers = cores))
+dds <- DESeq(dds, parallel=TRUE, BPPARAM=MulticoreParam(workers = 16))
 save(dds, file="output/dds.RData")
 
 deseq_res <- results(dds, contrast = c("TreatmentStatus", "Diète", "Pre"))
