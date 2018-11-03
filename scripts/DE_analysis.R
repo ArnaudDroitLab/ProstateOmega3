@@ -1,4 +1,3 @@
-library(ef.utils)
 library(RUVSeq)
 library(reshape2)
 library(dplyr)
@@ -88,16 +87,19 @@ expression_set_mix2 <- newSeqExpressionSet(counts_matrix[,samples$ERCCMix==2], p
 expression_set_mix2 <- betweenLaneNormalization(expression_set_mix2, which="upper")
 expression_set_mix2 <- RUVg(expression_set_mix2, rownames(counts_matrix)[ercc_genes], k=1)
 
+normed_counts = cbind(normCounts(expression_set_mix1), normCounts(expression_set_mix2))
+normed_samples = rbind(pData(expression_set_mix1), pData(expression_set_mix2))
 
-plotRLE(expression_set)
-plotPCA(expression_set)
 
-log_count = log2(assayData(expression_set)$normalizedCounts + 1)
+#plotRLE(expression_set)
+#plotPCA(expression_set)
+
+log_count = log2(normed_counts + 1)
 log_count_pca = prcomp(t(log_count), center=FALSE, scale.=FALSE)
 pca_df = as.data.frame(log_count_pca$x)
 pca_df$Label = rownames(pca_df)
 pca_df = dplyr::left_join(pca_df, samples, by=c(Label="Label"))
-ggplot(pca_df, mapping=aes(x=PC1, y=PC2, color=Group, label=Patient)) + geom_point()
+ggplot(pca_df, mapping=aes(x=PC1, y=PC2, color=ERCCMix, label=Patient)) + geom_point()
 
 expression_subset = expression_set[,pData(expression_set)$Group!="G7"]
 expression_subset_meta = pData(expression_subset)
