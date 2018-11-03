@@ -4,15 +4,43 @@ library(reshape2)
 library(dplyr)
 library(ggplot2)
 
-samples = read.table("input/samplesheet.txt", header=TRUE, sep="\t", fileEncoding="UTF-8")
-
+# Determine the filename and labels for the kallisto counts for the various libraries.
 libraries = Sys.glob("output/*")
 libraries_label = gsub("output/(P..._V..).*", "\\1", libraries)
 
+# Load the sample information.
+samples = read.table("input/samplesheet.txt", header=TRUE, sep="\t", fileEncoding="UTF-8")
 samples$Label = paste0(samples$Patient, "_", samples$Visite)
 samples$Library = libraries[match(samples$Label, libraries_label)]
 samples$kallisto = file.path(samples$Library, "abundance.tsv")
 samples$TreatmentStatus = factor(ifelse(samples$Visite=="V00", "Pre", as.character(samples$Group)), levels=c("Pre", "5-ARI", "Diète"))
+
+# Load information about the ERCC mix added to each sample.
+ercc_mix = read.table("input/ERCCmix.txt", header=TRUE, sep="\t")
+samples = left_join(samples, ercc_mix, c(Label="Patient"))
+
+
+# Copying read_identical from ef.utils since the package is currently impossible to load on graham due to broken dependancies.
+read_identical <- function(file.names, header.columns, data.columns, file.labels=basename(file.names), sep="\t", header=TRUE, ...) {
+    results=NULL
+    for(i in 1:length(file.names)) {
+        file.name = file.names[i]
+        file.label = file.labels[i]
+
+        file.data = read.table(file.name, sep=sep, header=header, stringsAsFactors=FALSE, ...)
+        if(is.null(results)) {
+            results = file.data[, header.columns, drop=FALSE]
+        }
+
+        colnames(file.data) <- paste(file.label, colnames(file.data), sep=".")
+
+        results = cbind(results, file.data[,data.columns, drop=FALSE])
+    }
+
+    return(results)
+}
+
+# Read count information.
 counts = read_identical(samples$kallisto, 1:3, 4, file.labels=samples$Label)
 
 counts_meta = counts[,1:3]
@@ -35,9 +63,31 @@ rownames(samples) = samples$Label
 ercc_concentrations = read.table("input/ERCCannot.txt", sep="\t", header=TRUE)
 ercc_matrix = counts_matrix[ercc_genes,]
 
-expression_set <- newSeqExpressionSet(counts_matrix, phenoData = samples)
-expression_set <- betweenLaneNormalization(expression_set, which="upper")
-expression_set <- RUVg(expression_set, rownames(counts_matrix)[ercc_genes], k=1)
+ercc_df = melt(log2(ercc_matrix + 1), varnames=c("ERCC", "Patient"), value.name="Count")
+ercc_df = left_join(ercc_df, ercc_concentrations, c(ERCC="ERCC.ID"))
+ercc_df = left_join(ercc_df, samples, c(Patient="Label"))
+ercc_df$EffectiveConcentration = ifelse(ercc_df$ERCCMix==1, ercc_df$concentration.in.Mix.1..attomoles.ul., ercc_df$concentration.in.Mix.2..attomoles.ul.)
+
+ercc_mean_df = ercc_df %>% group_by(EffectiveConcentration, Patient) %>% summarize(Mean=mean(Count))
+ercc_mean_df = left_join(ercc_mean_df, samples, c(Patient="Label"))
+
+ggplot(ercc_df, aes(x=log2(EffectiveConcentration), color=Visite)) + 
+    geom_point(mapping=aes(y=Count)) + 
+    geom_line(ercc_mean_df, mapping=aes(y=Mean, group=Patient), alpha=0.1) +
+#    guides(color=FALSE) +
+    facet_grid(~Visite)
+
+# We'll normalize in two batches: one for mix1 data, and the other for mix 2 data.
+# That means splitting V00 from V06 data.
+    
+expression_set_mix1 <- newSeqExpressionSet(counts_matrix[,samples$ERCCMix==1], phenoData = samples[samples$ERCCMix==1,])
+expression_set_mix1 <- betweenLaneNormalization(expression_set_mix1, which="upper")
+expression_set_mix1 <- RUVg(expression_set_mix1, rownames(counts_matrix)[ercc_genes], k=1)
+
+expression_set_mix2 <- newSeqExpressionSet(counts_matrix[,samples$ERCCMix==2], phenoData = samples[samples$ERCCMix==2,])
+expression_set_mix2 <- betweenLaneNormalization(expression_set_mix2, which="upper")
+expression_set_mix2 <- RUVg(expression_set_mix2, rownames(counts_matrix)[ercc_genes], k=1)
+
 
 plotRLE(expression_set)
 plotPCA(expression_set)
