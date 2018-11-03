@@ -2,6 +2,7 @@ library(RUVSeq)
 library(reshape2)
 library(dplyr)
 library(ggplot2)
+library(DESeq2)
 
 # Determine the filename and labels for the kallisto counts for the various libraries.
 libraries = Sys.glob("output/*")
@@ -13,6 +14,7 @@ samples$Label = paste0(samples$Patient, "_", samples$Visite)
 samples$Library = libraries[match(samples$Label, libraries_label)]
 samples$kallisto = file.path(samples$Library, "abundance.tsv")
 samples$TreatmentStatus = factor(ifelse(samples$Visite=="V00", "Pre", as.character(samples$Group)), levels=c("Pre", "5-ARI", "Diète"))
+samples$BothConditions = samples$Patient %in% (intersect(samples %>% filter(Visite=="V00") %>% pull(Patient), samples %>% filter(Visite=="V06") %>% pull(Patient)))
 
 # Load information about the ERCC mix added to each sample.
 ercc_mix = read.table("input/ERCCmix.txt", header=TRUE, sep="\t")
@@ -52,7 +54,6 @@ counts_subset = counts[filter_20,]
 counts_meta = counts_subset[,1:3]
 counts_matrix = as.matrix(counts_subset[,-(1:3)])
 
-ercc_genes = grepl("ERCC", counts_meta$target_id)
 
 rownames(counts_matrix) = counts_meta$target_id
 colnames(counts_matrix) = gsub(".est_counts", "", colnames(counts_matrix))
@@ -60,6 +61,8 @@ rownames(samples) = samples$Label
 
 
 ercc_concentrations = read.table("input/ERCCannot.txt", sep="\t", header=TRUE)
+ercc_genes = counts_meta$target_id %in% (ercc_concentrations %>% filter(log2.Mix.1.Mix.2.==0) %>% pull(ERCC.ID) )
+
 ercc_matrix = counts_matrix[ercc_genes,]
 
 ercc_df = melt(log2(ercc_matrix + 1), varnames=c("ERCC", "Patient"), value.name="Count")
@@ -79,16 +82,12 @@ ggplot(ercc_df, aes(x=log2(EffectiveConcentration), color=Visite)) +
 # We'll normalize in two batches: one for mix1 data, and the other for mix 2 data.
 # That means splitting V00 from V06 data.
     
-expression_set_mix1 <- newSeqExpressionSet(counts_matrix[,samples$ERCCMix==1], phenoData = samples[samples$ERCCMix==1,])
-expression_set_mix1 <- betweenLaneNormalization(expression_set_mix1, which="upper")
-expression_set_mix1 <- RUVg(expression_set_mix1, rownames(counts_matrix)[ercc_genes], k=1)
+expression_set <- newSeqExpressionSet(counts_matrix, phenoData = samples)
+expression_set <- betweenLaneNormalization(expression_set, which="upper")
+expression_set <- RUVg(expression_set, rownames(counts_matrix)[ercc_genes], k=1)
 
-expression_set_mix2 <- newSeqExpressionSet(counts_matrix[,samples$ERCCMix==2], phenoData = samples[samples$ERCCMix==2,])
-expression_set_mix2 <- betweenLaneNormalization(expression_set_mix2, which="upper")
-expression_set_mix2 <- RUVg(expression_set_mix2, rownames(counts_matrix)[ercc_genes], k=1)
-
-normed_counts = cbind(normCounts(expression_set_mix1), normCounts(expression_set_mix2))
-normed_samples = rbind(pData(expression_set_mix1), pData(expression_set_mix2))
+normed_counts = cbind(normCounts(expression_set))
+normed_samples = rbind(pData(expression_set))
 
 
 #plotRLE(expression_set)
@@ -101,10 +100,14 @@ pca_df$Label = rownames(pca_df)
 pca_df = dplyr::left_join(pca_df, samples, by=c(Label="Label"))
 ggplot(pca_df, mapping=aes(x=PC1, y=PC2, color=ERCCMix, label=Patient)) + geom_point()
 
-expression_subset = expression_set[,pData(expression_set)$Group!="G7"]
+expression_subset = expression_set[,pData(expression_set)$Group!="G7" & pData(expression_set)$BothConditions & pData(expression_set)$Patient %in% c("P031", "P045", "P049", "P050", "P053")]
 expression_subset_meta = pData(expression_subset)
 expression_subset_meta$TreatmentStatus = factor(expression_subset_meta$TreatmentStatus, levels=c("Pre", "5-ARI", "Diète"))
 expression_subset_meta$Patient = factor(expression_subset_meta$Patient)
 dds <- DESeqDataSetFromMatrix(normCounts(expression_subset), expression_subset_meta, ~ Patient + TreatmentStatus)
-dds <- DESeq(dds)
+dds <- DESeq(dds, parallel=TRUE, BPPARAM=MulticoreParam(workers = cores))
+save(dds, file="output/dds.RData")
 
+deseq_res <- results(dds, contrast = c("TreatmentStatus", "Diète", "Pre"))
+
+deseq_res <- results(dds, contrast = c("TreatmentStatus", "5-ARI", "Pre"))
