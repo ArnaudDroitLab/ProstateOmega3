@@ -1,0 +1,151 @@
+---
+output: html_document
+---
+
+```{r, echo=FALSE}
+library(dplyr, quietly=TRUE)
+
+all_samples = read.table("input/all_samples.txt", sep="\t", header=TRUE, encoding="UTF-8", stringsAsFactors=FALSE)
+all_samples$Randomisation[all_samples$Randomisation==""] = "Exclus"
+
+all_samples$Progression = ifelse(is.na(all_samples$Prog_V06) & is.na(all_samples$Prog_V12), NA,
+                              ifelse(!is.na(all_samples$Prog_V06) & all_samples$Prog_V06=="VRAI", "V06",
+                                ifelse(all_samples$Prog_V12=="VRAI", "V12", "Aucune")))
+
+
+rna_samples = read.table("input/rna_samples.txt", sep="\t", header=TRUE, encoding="UTF-8", stringsAsFactors=FALSE)
+```
+
+# Summarize by gleason score 
+
+## For all samples:
+### V00
+
+```{r, echo=FALSE}
+samples_by_gleason = all_samples %>% 
+    filter(P189_ToutesBiopsies_Visite.PCa14=="V00") %>% 
+    group_by(Randomisation) %>% 
+    summarize(G6=sum(BioGleason==6 | is.na(BioGleason), na.rm=TRUE),
+              G7=sum(BioGleason==7, na.rm=TRUE),
+              G8=sum(BioGleason==8, na.rm=TRUE))
+knitr::kable(samples_by_gleason)
+```
+
+### V06
+```{r, echo=FALSE}
+samples_by_gleason = all_samples %>% 
+    filter(P189_ToutesBiopsies_Visite.PCa14=="V06") %>% 
+    group_by(Randomisation) %>% 
+    summarize(G6=sum(BioGleason==6 | is.na(BioGleason), na.rm=TRUE),
+              G7=sum(BioGleason==7, na.rm=TRUE),
+              G8=sum(BioGleason==8, na.rm=TRUE))
+knitr::kable(samples_by_gleason)
+```
+
+
+## For samples with RNA available.
+### V00
+
+```{r, echo=FALSE}
+samples_by_gleason = all_samples %>% 
+    filter(P189_ToutesBiopsies_Visite.PCa14=="V00" & ARN=="VRAI") %>% 
+    group_by(Randomisation) %>% 
+    summarize(G6=sum(BioGleason==6 | is.na(BioGleason), na.rm=TRUE),
+              G7=sum(BioGleason==7, na.rm=TRUE),
+              G8=sum(BioGleason==8, na.rm=TRUE))
+knitr::kable(samples_by_gleason)
+```
+
+### V06
+
+```{r, echo=FALSE}
+samples_by_gleason = all_samples %>% 
+    filter(P189_ToutesBiopsies_Visite.PCa14=="V06" & ARN=="VRAI") %>% 
+    group_by(Randomisation) %>% 
+    summarize(G6=sum(BioGleason==6 | is.na(BioGleason), na.rm=TRUE),
+              G7=sum(BioGleason==7, na.rm=TRUE),
+              G8=sum(BioGleason==8, na.rm=TRUE))
+knitr::kable(samples_by_gleason)
+```
+
+## For samples with *matched* RNA available.
+### V00
+```{r, echo=FALSE}
+samples_by_gleason = all_samples %>% 
+    filter(P189_ToutesBiopsies_Visite.PCa14=="V00" & ARN_V00_NONA=="VRAI" & ARN_V06_NONA=="VRAI") %>% 
+    group_by(Randomisation) %>% 
+    summarize(G6=sum(BioGleason==6 | is.na(BioGleason), na.rm=TRUE),
+              G7=sum(BioGleason==7, na.rm=TRUE),
+              G8=sum(BioGleason==8, na.rm=TRUE))
+knitr::kable(samples_by_gleason)
+```
+
+### V06
+```{r, echo=FALSE}
+samples_by_gleason = all_samples %>% 
+    filter(P189_ToutesBiopsies_Visite.PCa14=="V06" & ARN_V00_NONA=="VRAI" & ARN_V06_NONA=="VRAI") %>% 
+    group_by(Randomisation) %>% 
+    summarize(G6=sum(BioGleason==6 | is.na(BioGleason), na.rm=TRUE),
+              G7=sum(BioGleason==7, na.rm=TRUE),
+              G8=sum(BioGleason==8, na.rm=TRUE))
+knitr::kable(samples_by_gleason)
+```
+
+# Progression
+## For all samples
+```{r, echo=FALSE}
+samples_by_gleason = all_samples %>% 
+    filter(P189_ToutesBiopsies_Visite.PCa14=="V00") %>% 
+    group_by(Randomisation) %>% 
+    summarize("Non applicable"=sum(is.na(Progression)),
+              "Aucune progression"=sum(Progression=="Aucune", na.rm=TRUE),
+              "Progression 6 mois"=sum(Progression=="V06", na.rm=TRUE),
+              "Progression 12 mois"=sum(Progression=="V12", na.rm=TRUE))
+knitr::kable(samples_by_gleason)
+
+prog_df = samples_by_gleason %>% 
+            mutate(ProgAll=`Progression 6 mois`+ `Progression 12 mois`) %>%
+            mutate(Total=`Aucune progression` + ProgAll) %>%
+            mutate(PercentProg=ProgAll/Total)
+diet_row = grepl("Avodart 6 mois", prog_df$Randomisation)
+diet_prog = prog_df$ProgAll[diet_row]
+diet_no_prog = prog_df[["Aucune progression"]][diet_row]
+diet_total = diet_prog + diet_no_prog
+diet_percent = sprintf("%2.1f", diet_prog / diet_total * 100)
+ari_row = grepl("Avodart 12 mois", prog_df$Randomisation)
+ari_prog = prog_df$ProgAll[ari_row]
+ari_no_prog = prog_df[["Aucune progression"]][ari_row]
+ari_total = ari_prog + ari_no_prog
+ari_percent = sprintf("%2.1f", ari_prog / ari_total * 100)
+diet_under = phyper(diet_prog, diet_prog + ari_prog, diet_no_prog + ari_no_prog, diet_total)
+```
+
+There are `r diet_prog`/`r diet_total` (`r diet_percent`%) progressions for the diet arm, and
+`r ari_prog`/`r ari_total` (`r ari_percent`%) progressions in the anti-androgen arm. The p-value
+of underrepresentation of progressions in the diet arm is `r sprintf("%1.2f", diet_under)`.
+
+## For samples with RNA available.
+```{r, echo=FALSE}
+samples_by_gleason = all_samples %>% 
+    filter(P189_ToutesBiopsies_Visite.PCa14=="V00" & ARN=="VRAI") %>% 
+    group_by(Randomisation) %>% 
+    summarize("Non applicable"=sum(is.na(Progression)),
+              "Aucune progression"=sum(Progression=="Aucune", na.rm=TRUE),
+              "Progression 6 mois"=sum(Progression=="V06", na.rm=TRUE),
+              "Progression 12 mois"=sum(Progression=="V12", na.rm=TRUE))
+knitr::kable(samples_by_gleason)
+```
+
+
+## For samples with matched RNA available.
+```{r, echo=FALSE}
+samples_by_gleason = all_samples %>% 
+    filter(P189_ToutesBiopsies_Visite.PCa14=="V00" & ARN_V00_NONA=="VRAI" & ARN_V06_NONA=="VRAI") %>% 
+    group_by(Randomisation) %>% 
+    summarize("Non applicable"=sum(is.na(Progression)),
+              "Aucune progression"=sum(Progression=="Aucune", na.rm=TRUE),
+              "Progression 6 mois"=sum(Progression=="V06", na.rm=TRUE),
+              "Progression 12 mois"=sum(Progression=="V12", na.rm=TRUE))
+knitr::kable(samples_by_gleason)
+```
+
