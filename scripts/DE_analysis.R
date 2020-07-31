@@ -127,6 +127,9 @@ ercc_titration(normCounts(expression_set), ercc_genes, samples, "normed")
 normed_counts = cbind(normCounts(expression_set))
 normed_samples = rbind(pData(expression_set))
 
+write.table(counts_matrix, sep="\t", file="output/RawCounts.txt", col.names=TRUE, row.names=TRUE, quote=FALSE)
+write.table(normed_counts, sep="\t", file="output/NormCounts.txt", col.names=TRUE, row.names=TRUE, quote=FALSE)
+
 # Plot MYC
 myc_data = normed_counts[annot_full$external_gene_name=="MYC" & !is.na(annot_full$external_gene_name),]
 myc_melt = melt(myc_data, varnames=c("Transcript", "Sample"), value.name="Count")
@@ -145,10 +148,20 @@ log_count_pca = prcomp(t(log_count), center=FALSE, scale.=FALSE)
 pca_df = as.data.frame(log_count_pca$x)
 pca_df$Label = rownames(pca_df)
 pca_df = dplyr::left_join(pca_df, samples, by=c(Label="Label"))
-ggplot(pca_df, mapping=aes(x=PC1, y=PC2, color=ERCCMix, label=Patient)) + geom_point()
+
+v00_df = pca_df %>% filter(Visite=="V00")
+v06_df = pca_df %>% filter(Visite=="V06")
+lines_df = left_join(v00_df, v06_df, by=c("Patient"="Patient"))
+
+
+ggplot(pca_df, mapping=aes(x=PC1, y=PC2)) + 
+    geom_point(mapping=aes(color=ERCCMix, label=Patient))
 
 pca_df$PCA_Group = ifelse(pca_df$Description == "V00 G7", "G7", as.character(pca_df$TreatmentStatus))
-ggplot(pca_df, mapping=aes(x=PC1, y=PC2, color=PCA_Group, label=Patient)) + geom_point()
+ggplot(pca_df, mapping=aes(x=PC1, y=PC2)) +
+    geom_segment(lines_df, mapping=aes(x=PC1.x, xend=PC1.y, y=PC2.x, yend=PC2.y), alpha=0.2) +
+    geom_point(mapping=aes(color=PCA_Group, label=Patient))
+
 ggsave("output/PCA.pdf")
 
 # Test G7 vs rest
@@ -189,10 +202,45 @@ expression_subset_meta = pData(expression_subset)
 expression_subset_meta$TreatmentStatus = factor(expression_subset_meta$TreatmentStatus, levels=c("Pre", "5ARI", "Diete"))
 expression_subset_meta$Patient = factor(expression_subset_meta$Patient)
 dds <- DESeqDataSetFromMatrix(normCounts(expression_subset), expression_subset_meta[,c("Patient", "TreatmentStatus")], ~ Patient + TreatmentStatus)
-dds <- DESeq(dds, parallel=TRUE, BPPARAM=MulticoreParam(workers = 8))
+#dds <- estimateSizeFactors(dds)
+sizeFactors(dds) <- 1
+dds <- estimateDispersions(dds)
+dds <- nbinomWaldTest(dds)
+
+#dds <- DESeq(dds, parallel=TRUE, BPPARAM=MulticoreParam(workers = 8))
 save(dds, file="output/dds.RData")
 
 deseq_res <- results(dds, contrast = c("TreatmentStatus", "Diete", "Pre"))
 write.table(as.data.frame(deseq_res), file="output/Diete.txt", sep="\t", col.names=TRUE, row.names=FALSE)
 deseq_res <- results(dds, contrast = c("TreatmentStatus", "5-ARI", "Pre"))
 write.table(as.data.frame(deseq_res), file="output/5-ARI.txt", sep="\t", col.names=TRUE, row.names=FALSE)
+
+
+pdf("output/Venn DE.pdf")
+input_files = list(Dutasteride="output/5-ARI.txt", Diete="output/Diete.txt", G7="output/CancerStatus.txt")
+datasets = lapply(input_files, read.table, sep="\t", header=TRUE, quote='"', dec=",")
+de_genes = lapply(datasets, function(x) { 
+    x %>% filter(padj <= 0.05 & abs(log2FoldChange) > log2(1.5) & !is.na(external_gene_name)) %>% 
+        pull(external_gene_name) %>% 
+        unique %>% 
+        as.character })
+grid.draw(venn.diagram(de_genes, file=NULL))
+dev.off()
+
+
+#### SCHLAP1 #####
+countData = read.table("output/NormCounts.txt", sep="\t", header=TRUE)
+de_cancer = read.table("output/CancerStatus.txt", header=TRUE, stringsAsFactors=FALSE)
+all_sample_data = read.table("input/all_samples.txt", header=TRUE, stringsAsFactors=FALSE, sep="\t")
+
+# all(rownames(countData)==de_cancer$target_id)
+SCHLAP1 = which(de_cancer$external_gene_name=="SCHLAP1")
+SCHLAP1_count = log2(as.numeric(countData[SCHLAP1[1],])+1)
+sample_group = samples$TreatmentStatus[match(colnames(countData), samples$Label)]
+gleason_score = all_sample_data$BioGleason[match(colnames(countData), all_sample_data$ID)]
+
+schlap_df = data.frame(Expression=SCHLAP1_count,
+                       Group=sample_group,
+                       Gleason=as.factor(gleason_score))
+                       
+ggplot(schlap_df, aes(x=Gleason, y=Expression)) + geom_point()                       
